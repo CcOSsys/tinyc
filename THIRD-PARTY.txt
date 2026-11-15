@@ -38,7 +38,7 @@ The main parts:
                             linux-firmware-* packages; redistributable, each under its own
                             licence (https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git)
 
-Written for tinyc / CcOS (this repository): the programs in apps/ (Apps, Wi-Fi, Notepad,
+Written for tinyc / CcOS (this repository, MIT licence - see LICENSE): the programs in apps/ (Apps, Wi-Fi, Notepad,
 Settings, the tray icons, the volume slider, the shutdown question), the scripts in overlay/
 (start-up, settings, the easy commands, automount...), the theme, the /o\ icons and the
 wallpapers (made with CcOS's own wallpaper generator), stage1/init and the build tools.

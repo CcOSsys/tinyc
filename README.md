@@ -34,3 +34,9 @@ Docs: https://ccossys.github.io/tinyc/docs.html
    → `sh tools/make_usbimg.sh tinyc-usb.img` (add `ARCH=x86` in front of each for the 32-bit one).
 
 The scripts expect the build folders in `/root/tinyc` (and `/root/tinyc32`); change the paths at the top for yours.
+
+## Licence
+
+tinyc's own code (everything in this repository) is under the MIT licence: see [LICENSE](LICENSE).
+The software tinyc is built from (Linux, Alpine, IceWM, Xfe, FLTK...) keeps its own licences: see
+[THIRD-PARTY.txt](THIRD-PARTY.txt).
