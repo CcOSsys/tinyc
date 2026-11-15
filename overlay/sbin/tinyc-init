@@ -6,6 +6,7 @@ mount -t devpts devpts /dev/pts
 mount -t tmpfs -o mode=1777 tmpfs /dev/shm
 mount -t tmpfs -o mode=755 tmpfs /run
 mount -t tmpfs -o mode=1777 tmpfs /tmp
+[ -d /sys/firmware/efi/efivars ] && mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null   # the start-up list (for Install tinyc)
 E=$(printf '\033'); G="$E[1;32m"; RD="$E[1;31m"; C="$E[1;36m"; N="$E[0m"
 ok()   { printf '[  %sOK%s  ] %s\n' "$G" "$N" "$1"; }
 fail() { printf '[ %sFAIL%s ] %s\n' "$RD" "$N" "$1"; }

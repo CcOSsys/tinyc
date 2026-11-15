@@ -1,5 +1,5 @@
 #!/bin/sh
-# tinyc stage 1 (the small initrd): find the tinyc USB stick, make room for your files on the
+# tinyc stage 1 (the small initrd): find tinyc on the computer's disk (when installed) or the tinyc USB stick, make room for your files on the
 # first start, then start tinyc from the stick: the system (system.sfs, read-only) with your
 # changes on top (kept on the stick's second part, "tinyc-data").
 export PATH=/sbin:/bin
@@ -16,8 +16,39 @@ printf '\n%stinyc%s %s (Linux %s)\n\n' "$C" "$N" "$VER" "$(uname -r)"
 ok "Mounted /proc, /sys and /dev"
 rescue() { fail "$1"; printf '\nType reboot to restart.\n\n'; t=/dev/$(cat /sys/class/tty/tty0/active 2>/dev/null); [ -c "$t" ] || t=/dev/tty1; exec setsid -c sh <"$t" >"$t" 2>&1; }
 
-# --- the stick: a partition labelled TINYC with tinyc/system.sfs on it
 mkdir -p /stick /data /lower /root
+# --- installed on the computer's own disk: the start-up menu says which partition (tinyc.disk=UUID)
+WANT=$(sed -n 's/.*tinyc\.disk=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$WANT" ]; then
+    find_disk() {
+        for b in /sys/class/block/*; do
+            d=${b##*/}
+            case "$(blkid "/dev/$d" 2>/dev/null)" in *"UUID=\"$WANT\""*) ;; *) continue ;; esac
+            mount -t ext4 -o noatime "/dev/$d" /data 2>/dev/null && return 0
+        done
+        return 1
+    }
+    n=0
+    until find_disk; do
+        n=$((n + 1))
+        [ $n -eq 6 ] && printf '[ %sWAIT%s ] Looking for tinyc on this computer'"'"'s disk...' "$Y" "$N"
+        [ $n -ge 60 ] && { printf '\n'; rescue "Couldn't find tinyc's partition on this computer's disk."; }
+        sleep 0.5
+    done
+    [ $n -ge 6 ] && printf '\r[  %sOK%s  ] Found tinyc on this computer'"'"'s disk          \n' "$G" "$N" || ok "Found tinyc on this computer's disk"
+    ok "Loaded your files and settings"
+    mount -t squashfs -o loop,ro /data/tinyc/system.sfs /lower || rescue "Couldn't open the tinyc system."
+    mkdir -p /data/system /data/.work /newroot
+    mount -t overlay overlay -o lowerdir=/lower,upperdir=/data/system,workdir=/data/.work /newroot || rescue "Couldn't start the tinyc system."
+    ok "Opened the tinyc system"
+    mkdir -p /newroot/mnt/data /newroot/mnt/system
+    mount --move /data /newroot/mnt/data
+    mount --move /lower /newroot/mnt/system
+    mount --move /proc /newroot/proc; mount --move /sys /newroot/sys; mount --move /dev /newroot/dev
+    exec switch_root /newroot /sbin/tinyc-init
+fi
+
+# --- the stick: a partition labelled TINYC with tinyc/system.sfs on it
 find_stick() {
     for b in /sys/class/block/*; do
         d=${b##*/}
@@ -52,7 +83,7 @@ if ! find_data; then
     printf '[ %sWAIT%s ] First start: making room for your files on the stick...' "$Y" "$N"
     new=$(tinyc-mkpart "/dev/$DISK" 2>/tmp/mkpart.log)
     # made before but never formatted (the power went off at the wrong moment): the stick's empty 2nd part
-    if [ -z "$new" ] && [ -b "/dev/${DISK}2" ] && ! blkid "/dev/${DISK}2" | grep -q 'TYPE='; then new=/dev/${DISK}2; fi
+    if [ -z "$new" ] && [ -b "/dev/${DISK}2" ]; then case "$(blkid "/dev/${DISK}2")" in *TYPE=*) ;; *) new=/dev/${DISK}2 ;; esac; fi
     if [ -n "$new" ]; then
         for i in 1 2 3 4 5 6 7 8 9 10; do [ -b "$new" ] && break; sleep 0.3; done
         mke2fs -q -F -t ext4 -L tinyc-data "$new" >/tmp/mke2fs.log 2>&1 && find_data

@@ -4,6 +4,7 @@ prog "Notepad" /usr/share/tinyc/icons/notepad_32x32.png notepad
 prog "Apps" /usr/share/tinyc/icons/apps_32x32.png apps
 prog "Wi-Fi" /usr/share/tinyc/icons/wifi_32x32.png wifi
 prog "Settings" /usr/share/tinyc/icons/settings_32x32.png settings
+prog "Install tinyc" /usr/share/tinyc/icons/install_32x32.png install-tinyc
 menuprog "Programs" /usr/share/tinyc/icons/files_32x32.png icewm-menu-fdo --no-sub-cats -s
 separator
 prog "Restart" - tinyc-shutdown reboot

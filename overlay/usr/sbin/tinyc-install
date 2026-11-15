@@ -1,0 +1,335 @@
+#!/bin/sh
+# tinyc-install - puts tinyc on the computer's own disk (the "Install tinyc" app runs this)
+#
+#   tinyc-install scan
+#       looks at the computer and prints what it found, one thing per line ("|" between fields):
+#         sys|FIRMWARE(uefi/bios)|BITS(64/32)|SECUREBOOT(0/1/-)|POWER(ac/battery/none)|SOURCE(ok/no)
+#         disk|NAME|SIZE_MB|TABLE(gpt/dos/none)|MODEL|PROBLEM
+#         win|DISK|PART|SIZE_MB|USED_MB|MIN_KEEP_MB|ROOM_MB|STATE|MESSAGE
+#             STATE: ok, bitlocker, hibernated, dirty, small, nofit, error
+#             ROOM_MB = the most tinyc can get next to it (0 = can't)
+#         free|DISK|START_SECTOR|END_SECTOR|SIZE_MB|PROBLEM
+#   tinyc-install run alongside DISK WINPART SIZE_MB KEEP   shrink Windows, tinyc after it
+#   tinyc-install run free      DISK START_SECTOR SIZE_MB KEEP   tinyc in empty space
+#   tinyc-install run replace   DISK - 0 KEEP               erase DISK, all of it for tinyc
+#       KEEP=1: bring this stick's files, settings and apps along
+#       prints "STEP N TEXT" while it works, then "DONE" or "ERR TEXT"
+#
+# Safety: it never touches the tinyc stick itself, never resizes Windows if it's encrypted
+# (BitLocker), hibernated (Fast Startup) or needs a disk check, and checks everything again
+# right before changing anything.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+SRC=/mnt/stick                 # the tinyc stick tinyc is running from
+MIN_TINYC=4096                 # tinyc gets at least 4 GB
+WIN_SPARE=10240                # Windows keeps at least 10 GB free for itself (updates...)
+T=/tmp/tinyc-install; mkdir -p $T
+
+# ---------------------------------------------------------------- helpers
+part_of() { case "$1" in *[0-9]) echo "${1}p$2" ;; *) echo "$1$2" ;; esac; }     # sda 3 -> sda3, nvme0n1 3 -> nvme0n1p3
+num_of()  { cat "/sys/class/block/$1/partition" 2>/dev/null; }
+disk_of() { basename "$(readlink -f "/sys/class/block/$1/..")"; }
+mb()      { echo $(( $1 / 2048 )); }                                         # sectors -> MB
+stick_disk() { awk '$2 == "/mnt/stick" { print $1 }' /proc/mounts | sed 's|/dev/||' | while read -r p; do disk_of "$p"; done; }
+firmware() { [ -d /sys/firmware/efi ] && echo uefi || echo bios; }
+bits() {
+    if [ -d /sys/firmware/efi ]; then cat /sys/firmware/efi/fw_platform_size 2>/dev/null || echo 64
+    else case "$(uname -m)" in x86_64) echo 64 ;; *) echo 32 ;; esac; fi
+}
+efi_name() { [ "$(bits)" = 32 ] && echo grubia32.efi || echo grubx64.efi; }
+efi_fallback() { [ "$(bits)" = 32 ] && echo BOOTIA32.EFI || echo BOOTX64.EFI; }
+secureboot() {
+    f=$(ls /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | head -1)
+    [ -n "$f" ] || { echo -; return; }
+    v=$(od -An -tu1 "$f" 2>/dev/null | awk '{ print $NF }'); [ "$v" = 1 ] && echo 1 || echo 0
+}
+power() {
+    bat=0; ac=0
+    for s in /sys/class/power_supply/*; do
+        [ -e "$s/type" ] || continue
+        case "$(cat "$s/type")" in Battery) bat=1 ;; Mains) [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && ac=1 ;; esac
+    done
+    [ $bat = 0 ] && echo none || { [ $ac = 1 ] && echo ac || echo battery; }
+}
+table_of() { sfdisk -d "/dev/$1" 2>/dev/null | sed -n 's/^label: //p'; }
+# "NUM START SIZE TYPE" for each partition
+parts() { sfdisk -d "/dev/$1" 2>/dev/null | sed -n 's|^/dev/[^ ]*[^0-9]\([0-9]*\) : start= *\([0-9]*\), size= *\([0-9]*\), type=\([^,]*\).*|\1 \2 \3 \4|p'; }
+last_sector() {     # the last sector a partition may use
+    l=$(sfdisk -d "/dev/$1" 2>/dev/null | sed -n 's/^last-lba: //p')
+    [ -n "$l" ] && echo "$l" || echo $(( $(cat "/sys/block/$1/size") - 1 ))
+}
+is_bitlocker() { [ "$(dd if="/dev/$1" bs=1 skip=3 count=8 2>/dev/null)" = "-FVE-FS-" ]; }
+is_ntfs() { [ "$(dd if="/dev/$1" bs=1 skip=3 count=4 2>/dev/null)" = "NTFS" ]; }
+has_windows() {    # read straight from the disk (works even when Windows is hibernated)
+    ntfsls -f -p /Windows/System32 "/dev/$1" >/dev/null 2>&1
+}
+unmount_disk() {     # everything on the disk that's mounted (the automount mounts drives under /media)
+    for p in $(awk '{ print $1 }' /proc/mounts | grep "^/dev/$1"); do
+        sync; umount "$p" 2>/dev/null || umount -l "$p" 2>/dev/null
+    done
+    ! grep -q "^/dev/$1" /proc/mounts
+}
+step() { echo "STEP $*"; }
+die()  { echo "ERR $*"; exit 1; }
+
+# what ntfsresize says about a Windows partition -> STATE|USED_MB|MINSIZE_MB|MESSAGE
+ntfs_state() {
+    if is_bitlocker "$1"; then echo "bitlocker|0|0|BitLocker (device encryption) is on"; return; fi
+    out=$(ntfsresize --info --force --no-progress-bar "/dev/$1" 2>&1 </dev/null)
+    plain=$(ntfsresize --info --no-progress-bar "/dev/$1" 2>&1 </dev/null); rc=$?
+    used=$(printf '%s\n' "$out" | sed -n 's/^Space in use *: *\([0-9]*\) MB.*/\1/p')
+    min=$(printf '%s\n' "$out" | sed -n 's/.*resize at [0-9]* bytes or \([0-9]*\) MB.*/\1/p')
+    if printf '%s' "$plain" | grep -qi "hibernat"; then echo "hibernated|${used:-0}|${min:-0}|Windows wasn't fully shut down (Fast Startup is on)"; return; fi
+    if printf '%s' "$plain" | grep -qiE "chkdsk|inconsistent|scheduled for check|unclean|dirty"; then
+        echo "dirty|${used:-0}|${min:-0}|Windows needs to check its disk first"; return; fi
+    [ $rc = 0 ] && [ -n "$min" ] || { echo "error|${used:-0}|0|$(printf '%s' "$plain" | grep -v '^ntfsresize' | head -1)"; return; }
+    echo "ok|${used:-0}|$min|"
+}
+
+# ---------------------------------------------------------------- scan
+scan() {
+    src=ok; [ -f $SRC/tinyc/system.sfs ] && [ -f $SRC/boot/vmlinuz ] && [ -d $SRC/tinyc/install ] || src=no
+    echo "sys|$(firmware)|$(bits)|$(secureboot)|$(power)|$src"
+    me=$(stick_disk)
+    for b in /sys/block/*; do
+        d=${b##*/}
+        case "$d" in loop*|ram*|zram*|sr*|fd*|mmcblk*boot*|mmcblk*rpmb) continue ;; esac
+        [ "$d" = "$me" ] && continue
+        size=$(mb "$(cat "$b/size")"); [ "$size" -gt 0 ] || continue
+        model=$(cat "$b/device/model" 2>/dev/null | sed 's/ *$//; s/|/ /g'); [ -n "$model" ] || model=$d
+        case "$(readlink -f "$b")" in */usb*) model="$model (USB)" ;; esac
+        tbl=$(table_of "$d"); [ -n "$tbl" ] || tbl=none
+        prob=""
+        [ "$size" -lt $MIN_TINYC ] && prob="too small for tinyc"
+        [ "$(firmware)" = bios ] && [ "$tbl" = gpt ] && prob="GPT disk on an old BIOS computer: only 'erase' works here"
+        [ "$(firmware)" = uefi ] && [ "$tbl" = dos ] && prob="MBR disk on a UEFI computer: only 'erase' works here"
+        echo "disk|$d|$size|$tbl|$model|$prob"
+        [ "$tbl" = none ] && continue
+        last=$(last_sector "$d")
+        # Windows partitions
+        parts "$d" > $T/parts
+        while read -r n start len type; do
+            p=$(part_of "$d" "$n")
+            is_ntfs "$p" || is_bitlocker "$p" || continue
+            if ! is_bitlocker "$p" && ! has_windows "$p"; then continue; fi
+            IFS='|' read -r state used min msg <<EOF
+$(ntfs_state "$p")
+EOF
+            # room next to it: up to the next partition (or the end of the disk)
+            next=$(awk -v s="$start" '$2 > s { print $2 }' $T/parts | sort -n | head -1); [ -n "$next" ] || next=$((last + 1))
+            keep=$(( min + WIN_SPARE )); wsize=$(mb "$len"); [ $keep -gt "$wsize" ] && keep=$wsize
+            room=$(( (next - start) / 2048 - keep - 2 )); [ $room -lt 0 ] && room=0
+            if [ "$tbl" = dos ] && [ "$(awk '$1 <= 4' $T/parts | wc -l)" -ge 4 ]; then state=nofit; msg="no free place for one more partition (MBR allows 4)"; room=0; fi
+            if [ "$tbl" = dos ] && [ "$n" -gt 4 ]; then state=nofit; msg="Windows is in a logical partition"; room=0; fi
+            [ "$state" = ok ] && [ $room -lt $MIN_TINYC ] && { state=small; msg="Windows doesn't have enough free space to share"; }
+            echo "win|$d|$p|$wsize|$used|$keep|$room|$state|$msg"
+        done < $T/parts
+        # empty space
+        sfdisk -F "/dev/$d" 2>/dev/null | awk 'NF == 4 && $1 ~ /^[0-9]+$/ { print $1, $2 }' | while read -r s e; do
+            s2=$(( (s + 2047) / 2048 * 2048 )); [ $s2 -le "$e" ] || continue
+            sz=$(mb $(( e - s2 + 1 ))); [ "$sz" -ge 1024 ] || continue
+            pr=""; [ "$sz" -lt $MIN_TINYC ] && pr="too small (tinyc needs 4 GB)"
+            [ "$tbl" = dos ] && [ "$(awk '$1 <= 4' $T/parts | wc -l)" -ge 4 ] && pr="no free place for one more partition (MBR allows 4)"
+            echo "free|$d|$s2|$e|$sz|$pr"
+        done
+    done
+}
+
+# ---------------------------------------------------------------- install
+# bring tinyc onto partition $1 (already made), with the boot menu
+put_tinyc() {    # PART KEEP WINDOWS(0/1) DISK
+    P=$1; KEEP=$2; WIN=$3; D=$4
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -b "/dev/$P" ] && break; sleep 0.5; done
+    [ -b "/dev/$P" ] || die "The new partition didn't show up."
+    step 4 "Formatting the space for tinyc"
+    mkfs.ext4 -q -F -L tinyc "/dev/$P" >$T/mkfs.log 2>&1 || die "Couldn't format the new partition: $(tail -1 $T/mkfs.log)"
+    UUID=$(blkid "/dev/$P" | sed -n 's/.* UUID="\([^"]*\)".*/\1/p')
+    [ -n "$UUID" ] || die "Couldn't read the new partition's ID."
+    mkdir -p $T/new; mount -t ext4 "/dev/$P" $T/new || die "Couldn't open the new partition."
+    step 5 "Copying tinyc"
+    mkdir -p $T/new/boot/grub $T/new/tinyc $T/new/system $T/new/.work
+    cp $SRC/boot/vmlinuz $SRC/boot/initrd.gz $T/new/boot/ && cp $SRC/tinyc/system.sfs $T/new/tinyc/ \
+        || { umount $T/new; die "Couldn't copy tinyc (is the stick still in?)."; }
+    printf 'tinyc is installed on this partition.\nYour files, settings and apps are in system/.\n' > $T/new/tinyc/installed.txt
+    if [ "$KEEP" = 1 ] && [ -d /mnt/data/system ]; then
+        step 6 "Copying your files, settings and apps"
+        ( cd /mnt/data/system && tar cf - . ) | ( cd $T/new/system && tar xf - ) 2>/dev/null
+        # folders the system had removed and made again (overlay "opaque" folders) keep that mark
+        if command -v getfattr >/dev/null; then
+            ( cd /mnt/data/system && getfattr -R -h --absolute-names -n trusted.overlay.opaque . 2>/dev/null | sed -n 's/^# file: //p' ) | while IFS= read -r f; do
+                setfattr -h -n trusted.overlay.opaque -v y "$T/new/system/$f" 2>/dev/null
+            done
+        fi
+    else
+        step 6 "Starting with fresh settings"
+    fi
+    mkdir -p $T/new/system/etc/tinyc
+    cp /etc/tinyc/settings $T/new/system/etc/tinyc/settings 2>/dev/null
+    # Windows keeps the computer's clock in local time
+    if [ "$WIN" = 1 ]; then
+        grep -q '^RTC_LOCAL=' $T/new/system/etc/tinyc/settings && sed -i 's/^RTC_LOCAL=.*/RTC_LOCAL=1/' $T/new/system/etc/tinyc/settings \
+            || echo RTC_LOCAL=1 >> $T/new/system/etc/tinyc/settings
+    fi
+    step 7 "Setting up the start-up menu"
+    write_menu "$UUID" "$WIN"
+    sync
+    if [ "$(firmware)" = uefi ]; then boot_uefi "$D" || { umount $T/new; exit 1; }
+    else boot_bios "$D" "$P" || { umount $T/new; exit 1; }; fi
+    sync; umount $T/new
+    step 8 "Done"
+    echo DONE
+}
+
+write_menu() {    # UUID WINDOWS
+    G=$T/new/boot/grub
+    {
+        echo "# tinyc start-up menu (made by tinyc-install)"
+        echo "insmod all_video"
+        echo "set gfxpayload=keep"
+        echo "set menu_color_normal=light-gray/black"
+        echo "set menu_color_highlight=black/light-cyan"
+        echo "load_env"
+        echo 'if [ -n "${saved_entry}" ]; then set default="${saved_entry}"; else set default=tinyc; fi'
+        [ "$2" = 1 ] && echo "set timeout=5" || echo "set timeout=2"
+        echo 'function remember { saved_entry="${chosen}"; save_env saved_entry; }'
+        echo "menuentry \"tinyc\" --id tinyc {"
+        echo "    remember"
+        echo "    linux /boot/vmlinuz quiet loglevel=3 panic=10 logo.nologo tinyc.disk=$1"
+        echo "    initrd /boot/initrd.gz"
+        echo "}"
+        if [ "$2" = 1 ]; then
+            echo "menuentry \"Windows\" --id windows {"
+            echo "    remember"
+            if [ "$(firmware)" = uefi ]; then
+                echo "    search --no-floppy --file --set=root /EFI/Microsoft/Boot/bootmgfw.efi"
+                echo "    chainloader /EFI/Microsoft/Boot/bootmgfw.efi"
+            else
+                echo "    search --no-floppy --file --set=root /bootmgr"
+                echo "    ntldr /bootmgr"
+            fi
+            echo "}"
+        fi
+        echo "menuentry \"tinyc (safe graphics)\" --id safe {"
+        echo "    linux /boot/vmlinuz quiet loglevel=3 panic=10 logo.nologo nomodeset vga=791 tinyc.disk=$1"
+        echo "    initrd /boot/initrd.gz"
+        echo "}"
+    } > $G/grub.cfg
+    # GRUB's memory of the last choice: exactly 1024 bytes
+    { printf '# GRUB Environment Block\n'; printf 'saved_entry=tinyc\n'; } > $G/grubenv
+    n=$((1024 - $(wc -c < $G/grubenv))); head -c $n /dev/zero | tr '\0' '#' >> $G/grubenv
+}
+
+boot_uefi() {    # DISK
+    D=$1; esp=""
+    while read -r n start len type; do
+        case "$type" in C12A7328-F81F-11D2-BA4B-00A0C93EC93B|c12a7328-f81f-11d2-ba4b-00a0c93ec93b|EF|ef) esp=$(part_of "$D" "$n"); espn=$n ;; esac
+    done <<EOF
+$(parts "$D")
+EOF
+    [ -n "$esp" ] || { echo "ERR No EFI system partition on this disk."; return 1; }
+    mkdir -p $T/esp; mount -t vfat "/dev/$esp" $T/esp || { echo "ERR Couldn't open the EFI system partition."; return 1; }
+    mkdir -p $T/esp/EFI/tinyc
+    cp "$SRC/tinyc/install/$(efi_name)" "$T/esp/EFI/tinyc/$(efi_name)" || { umount $T/esp; echo "ERR Couldn't copy the start-up menu."; return 1; }
+    # a disk with nothing else on it also gets the standard file, which every computer starts
+    if [ ! -d $T/esp/EFI/Microsoft ]; then mkdir -p $T/esp/EFI/BOOT; cp "$SRC/tinyc/install/$(efi_name)" "$T/esp/EFI/BOOT/$(efi_fallback)"; fi
+    sync; umount $T/esp
+    mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null
+    # one "tinyc" entry in the computer's start-up list, first in line
+    for b in $(efibootmgr 2>/dev/null | awk '$1 ~ /^Boot[0-9A-F][0-9A-F][0-9A-F][0-9A-F]/ && $2 == "tinyc" { print substr($1, 5, 4) }'); do efibootmgr -q -b "$b" -B >/dev/null 2>&1; done
+    efibootmgr -q -c -d "/dev/$D" -p "$espn" -L tinyc -l "\\EFI\\tinyc\\$(efi_name)" >$T/efi.log 2>&1 \
+        || echo "STEP 7 Note: the computer didn't take the new start-up entry; pick tinyc in its boot menu (often F12)"
+    return 0
+}
+
+boot_bios() {    # DISK PART
+    D=$1
+    first=$(parts "$D" | awk '{ print $2 }' | sort -n | head -1)
+    core=$SRC/tinyc/install/core.img
+    need=$(( ($(wc -c < "$core") + 511) / 512 + 1 ))
+    [ "${first:-0}" -gt "$need" ] || { echo "ERR There's no room for the start-up menu before the first partition (it starts at sector $first)."; return 1; }
+    # keep the old start code, in case someone wants Windows' own back
+    dd if="/dev/$D" of=$T/new/tinyc/mbr-before-tinyc.bin bs=512 count=1 2>/dev/null
+    dd if=$SRC/tinyc/install/boot.img of="/dev/$D" bs=440 count=1 conv=notrunc 2>/dev/null || { echo "ERR Couldn't write the start-up code."; return 1; }
+    dd if="$core" of="/dev/$D" bs=512 seek=1 conv=notrunc 2>/dev/null || { echo "ERR Couldn't write the start-up menu."; return 1; }
+    # (the "active" mark stays where it is: Windows' own start code needs it on its partition)
+    sync; return 0
+}
+
+run() {
+    MODE=$1; D=$2; X=$3; SIZE=$4; KEEP=$5
+    [ "$(id -u)" = 0 ] || die "tinyc-install has to run as root."
+    [ -f $SRC/tinyc/system.sfs ] && [ -d $SRC/tinyc/install ] || die "Start tinyc from its USB stick to install it."
+    [ -b "/dev/$D" ] || die "There's no disk called $D."
+    [ "$D" = "$(stick_disk)" ] && die "That's the tinyc stick itself."
+    step 1 "Getting the disk ready"
+    unmount_disk "$D" || die "Something is still using $D. Close Files and the Terminal windows on it, then try again."
+    tbl=$(table_of "$D")
+    case "$MODE" in
+    alongside)
+        W=$X; n=$(num_of "$W"); [ -n "$n" ] && [ "$(disk_of "$W")" = "$D" ] || die "Windows' partition $W isn't on $D."
+        IFS='|' read -r state used min msg <<EOF
+$(ntfs_state "$W")
+EOF
+        [ "$state" = ok ] || die "Can't shrink Windows: $msg."
+        parts "$D" > $T/parts
+        read -r wn wstart wlen wtype <<EOF
+$(awk -v n="$n" '$1 == n' $T/parts)
+EOF
+        next=$(awk -v s="$wstart" '$2 > s { print $2 }' $T/parts | sort -n | head -1); [ -n "$next" ] || next=$(( $(last_sector "$D") + 1 ))
+        keep=$(( min + WIN_SPARE ))
+        # Windows' new size (MB): room for tinyc between it and the next partition
+        neww=$(( (next - SIZE * 2048 - wstart) / 2048 - 1 ))
+        [ "$SIZE" -ge $MIN_TINYC ] || die "tinyc needs at least 4 GB."
+        [ $neww -ge $keep ] || die "Windows can't get that small (it needs at least $((keep / 1024)) GB)."
+        if [ $neww -lt $(mb "$wlen") ]; then
+            step 2 "Shrinking Windows (this can take a while, don't turn the computer off)"
+            ntfsresize --no-progress-bar -n -s $((neww * 1048576)) "/dev/$W" >$T/resize-test.log 2>&1 </dev/null \
+                || die "Windows can't be shrunk safely: $(grep -v '^ntfsresize' $T/resize-test.log | tail -1)"
+            printf 'y\n' | ntfsresize --no-progress-bar -s $((neww * 1048576)) "/dev/$W" >$T/resize.log 2>&1 \
+                || die "Shrinking Windows didn't work, nothing else was changed: $(tail -1 $T/resize.log)"
+            printf ',%s\n' $(( neww * 2048 )) | sfdisk -q --no-reread -N "$n" "/dev/$D" >$T/sfdisk1.log 2>&1 \
+                || die "Windows was shrunk, but its partition couldn't be made smaller: $(tail -1 $T/sfdisk1.log). Windows still works."
+        fi
+        pstart=$(( (wstart + neww * 2048 + 2047) / 2048 * 2048 ))
+        [ $(( (next - pstart) / 2048 )) -ge $MIN_TINYC ] || die "Not enough room after Windows."
+        plen=$(( (next - pstart) / 2048 * 2048 )); [ $plen -gt $((SIZE * 2048)) ] && plen=$((SIZE * 2048))
+        new_part "$D" "$pstart" "$plen" "$tbl"
+        put_tinyc "$NEWP" "$KEEP" 1 "$D" ;;
+    free)
+        pstart=$X; [ "$SIZE" -ge $MIN_TINYC ] || die "tinyc needs at least 4 GB."
+        win=0; for p in $(parts "$D" | awk '{ print $1 }'); do q=$(part_of "$D" "$p"); { is_bitlocker "$q" || { is_ntfs "$q" && has_windows "$q"; }; } && win=1; done
+        step 2 "Making room for tinyc"
+        new_part "$D" "$pstart" $((SIZE * 2048)) "$tbl"
+        put_tinyc "$NEWP" "$KEEP" $win "$D" ;;
+    replace)
+        step 2 "Erasing the disk"
+        if [ "$(firmware)" = uefi ]; then
+            printf 'label: gpt\n,512M,U\n,,L\n' | sfdisk -q --wipe always "/dev/$D" >$T/sfdisk.log 2>&1 || die "Couldn't erase the disk: $(tail -1 $T/sfdisk.log)"
+            esp=$(part_of "$D" 1)
+            for i in 1 2 3 4 5 6 7 8 9 10; do [ -b "/dev/$esp" ] && break; sleep 0.5; done
+            mkfs.vfat -F 32 -n EFI "/dev/$esp" >/dev/null 2>&1 || die "Couldn't format the EFI system partition."
+            NEWP=$(part_of "$D" 2)
+        else
+            printf 'label: dos\n2048,,83,*\n' | sfdisk -q --wipe always "/dev/$D" >$T/sfdisk.log 2>&1 || die "Couldn't erase the disk: $(tail -1 $T/sfdisk.log)"
+            NEWP=$(part_of "$D" 1)
+        fi
+        put_tinyc "$NEWP" "$KEEP" 0 "$D" ;;
+    *) die "Unknown way to install: $MODE" ;;
+    esac
+}
+
+new_part() {    # DISK START LENGTH TABLE  -> NEWP
+    before=$(parts "$1" | awk '{ print $1 }')
+    t=L; [ "$4" = dos ] && t=83
+    printf 'start=%s, size=%s, type=%s\n' "$2" "$3" "$t" | sfdisk -q --append "/dev/$1" >$T/sfdisk2.log 2>&1 \
+        || die "Couldn't make the new partition: $(tail -1 $T/sfdisk2.log)"
+    n=$(parts "$1" | awk '{ print $1 }' | grep -vxF "$before" | head -1)
+    [ -n "$n" ] || die "Couldn't find the new partition."
+    NEWP=$(part_of "$1" "$n")
+}
+
+case "$1" in
+    scan) scan ;;
+    run) shift; run "$@" ;;
+    *) echo "tinyc-install scan | run MODE DISK X SIZE_MB KEEP"; exit 1 ;;
+esac

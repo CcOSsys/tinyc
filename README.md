@@ -9,6 +9,7 @@ things a computer should do, it just isn't fancy about it. It even runs on a pot
 - The easy Terminal commands from CcOS: `mkf`, `rd`, `adf`, `rn`, `cpf`, `rmt`, `op`,
   `lsusb` / `cdusb` / `xusb` / `jusb`, `space`, `net`, `whereami`, `hints off/on`
 - 64-bit, and a separate 32-bit version for really old computers
+- **Install tinyc**: puts tinyc on the computer's own disk (next to Windows, in empty space, or the whole disk), UEFI and old BIOS
 
 Docs: https://ccossys.github.io/tinyc/docs.html
 
@@ -18,7 +19,7 @@ Docs: https://ccossys.github.io/tinyc/docs.html
 | --- | --- |
 | `apps/` | tinyc's own programs (C/C++ with FLTK and Xlib) |
 | `overlay/` | tinyc's own files, copied on top of Alpine (start-up, settings, easy commands, theme, icons, wallpapers) |
-| `stage1/init` | the small first start-up: finds the stick, makes the data part, starts tinyc |
+| `stage1/init` | the small first start-up: finds tinyc (on the computer's disk, or the stick), makes the data part, starts tinyc |
 | `tools/` | build scripts: `make_stage.sh`, `make_stage1.sh`, `make_usbimg.sh`, `grub.cfg` |
 | `kernel-tinyc.config`, `kernel-tinyc32.config` | the Linux kernel settings (64-bit / 32-bit) |
 | `packages.txt` | the Alpine packages tinyc is made of |

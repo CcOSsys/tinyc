@@ -32,6 +32,19 @@ else
 fi
 # old BIOS: GRUB's core goes in the gap after the partition table (sectors 1...)
 grub-mkimage -O i386-pc -o $W/core.img -c $W/embed.cfg -p /boot/grub biosdisk $MODS
+# --- the start-up menu "Install tinyc" puts on the computer's disk (UEFI + old BIOS), with Windows next to it
+mkdir -p $W/f/tinyc/install
+printf 'search --no-floppy --file --set=root /tinyc/installed.txt\nset prefix=($root)/boot/grub\nconfigfile ($root)/boot/grub/grub.cfg\n' > $W/inst.cfg
+IMODS="part_msdos part_gpt fat ext2 ntfs search search_fs_file search_fs_uuid configfile linux normal echo test all_video gfxterm reboot halt loadenv sleep chain"
+if [ "$ARCH" = x86 ]; then
+    cp $W/inst.cfg $W32/buildroot/tmp/efi/inst.cfg
+    chroot $W32/buildroot /usr/bin/grub-mkstandalone -O i386-efi -o /tmp/efi/grubia32.efi --modules="$IMODS" --locales="" --themes="" --fonts="" "boot/grub/grub.cfg=/tmp/efi/inst.cfg"
+    mv $W32/buildroot/tmp/efi/grubia32.efi $W/f/tinyc/install/grubia32.efi
+else
+    grub-mkstandalone -O x86_64-efi -o $W/f/tinyc/install/grubx64.efi --modules="$IMODS" --locales="" --themes="" --fonts="" "boot/grub/grub.cfg=$W/inst.cfg"
+fi
+grub-mkimage -O i386-pc -o $W/f/tinyc/install/core.img -c $W/inst.cfg -p /boot/grub biosdisk ntldr $IMODS
+cp /usr/lib/grub/i386-pc/boot.img $W/f/tinyc/install/boot.img
 # the FAT32 part
 truncate -s ${FATMB}M $W/fat.img
 mkfs.vfat -F 32 -n TINYC $W/fat.img >/dev/null

@@ -18,7 +18,7 @@ list)
     L=$(sticks)
     if [ -z "$L" ]; then
         echo "No USB sticks plugged in. (Plug one in and type lsusb again.)"
-        echo "${D}The stick tinyc runs from isn't listed: your files are kept on it already.${N}"
+        [ -d /mnt/stick/tinyc ] && echo "${D}The stick tinyc runs from isn't listed: your files are kept on it already.${N}"
         exit 0
     fi
     echo "USB sticks:"

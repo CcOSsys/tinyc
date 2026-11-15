@@ -3,9 +3,12 @@ alpine-keys
 alpine-release
 alsa-utils
 apk-tools
+attr
 bash
 busybox
+dosfstools
 e2fsprogs
+efibootmgr
 eudev
 font-dejavu
 icewm
@@ -16,8 +19,10 @@ libfltk
 libfltk_images
 musl-utils
 nano
+ntfs-3g-progs
 openresolv
 setxkbmap
+sfdisk
 tzdata
 wireless-regdb
 xf86-input-libinput

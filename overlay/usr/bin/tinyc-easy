@@ -22,6 +22,8 @@ cmd=${0##*/}; [ "$cmd" = tinyc-easy ] && { cmd=$1; shift; }
 if [ "$1" = "--raw" ]; then line=$2; else line="$*"; fi
 line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 HOME=${HOME:-/root}
+# where tinyc keeps everything: its USB stick, or (installed) this computer's disk
+if [ -d /mnt/stick/tinyc ]; then KEPT="the tinyc stick"; KEPTSHORT=Stick; else KEPT="this computer's disk"; KEPTSHORT=Disk; fi
 TRASH=$HOME/.local/share/Trash
 
 clean() {
@@ -224,8 +226,8 @@ space)
         printf "  ${C}%-6s${N} %s  %s free of %s  ${D}%s${N}\n" "$1" "$(bar $((tot - fr)) $tot)" "$(human $fr)" "$(human $tot)" "$3"
     }
     echo "Free space:"
-    if mountpoint -q /mnt/data 2>/dev/null; then row "Stick" /mnt/data "your files and apps"
-    else echo "  tinyc's stick isn't found: nothing is kept after a restart"; fi
+    if mountpoint -q /mnt/data 2>/dev/null; then row "$KEPTSHORT" /mnt/data "your files and apps"
+    else echo "  tinyc's place for your files isn't found: nothing is kept after a restart"; fi
     for u in $(/usr/bin/tinyc-usb names 2>/dev/null); do
         r=$(/usr/bin/tinyc-usb find "$u" 2>/dev/null); row "$u" "$(printf '%s' "$r" | cut -f2)" "$(printf '%s' "$r" | cut -f3)"
     done
@@ -268,9 +270,9 @@ whereami)
     done
     if [ -n "$u" ]; then echo "You're on the USB stick $u${s:+, in the folder ${s#/}}."
     else case "$p" in
-        "$HOME") echo "You're in your home folder (~). Your files go here, and they're kept on the tinyc stick." ;;
+        "$HOME") echo "You're in your home folder (~). Your files go here, and they're kept on $KEPT." ;;
         "$TRASH"|"$TRASH"/*) echo "You're in the Trash." ;;
-        "$HOME"/*) echo "You're in ${p#"$HOME"/}, inside your home folder (kept on the tinyc stick)." ;;
+        "$HOME"/*) echo "You're in ${p#"$HOME"/}, inside your home folder (kept on $KEPT)." ;;
         /tmp|/tmp/*) echo "You're in a temporary folder: everything here is gone after a restart." ;;
         /media) echo "You're in /media, where USB sticks show up. (lsusb lists them)" ;;
         /mnt/stick|/mnt/stick/*) echo "You're on the tinyc stick's start-up part (where tinyc itself is). Better not to change things here." ;;

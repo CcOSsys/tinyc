@@ -30,6 +30,10 @@ The main parts:
   ALSA utilities            GPL-2.0          (sound)
   bash 5.3                  GPL-3.0          nano 9  GPL-3.0
   e2fsprogs 1.47            GPL-2.0 / LGPL / MIT  (makes the stick's data part)
+  ntfs-3g (ntfsresize...)   GPL-2.0 / LGPL   https://github.com/tuxera/ntfs-3g  (makes Windows smaller)
+  util-linux sfdisk         GPL-2.0          (partitions, for Install tinyc)
+  efibootmgr                GPL-2.0          (adds tinyc to the computer's start-up list)
+  dosfstools, attr          GPL-3.0 / GPL-2.0, LGPL-2.1
   apk-tools                 GPL-2.0          (installs apps)
   DejaVu fonts              Bitstream Vera / DejaVu licence (free)
   tz database               public domain    https://www.iana.org/time-zones
@@ -39,7 +43,7 @@ The main parts:
                             licence (https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git)
 
 Written for tinyc / CcOS (this repository, MIT licence - see LICENSE): the programs in apps/ (Apps, Wi-Fi, Notepad,
-Settings, the tray icons, the volume slider, the shutdown question), the scripts in overlay/
+Settings, Install tinyc, the tray icons, the volume slider, the shutdown question), the scripts in overlay/
 (start-up, settings, the easy commands, automount...), the theme, the /o\ icons and the
 wallpapers (made with CcOS's own wallpaper generator), stage1/init and the build tools.
 apps/mkpart.c comes from CcOS. apps/glstub/ are tiny empty stand-ins for libGL/libGLU.

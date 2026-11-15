@@ -5,7 +5,11 @@ case "$1" in
 add)
     # not tinyc's own stick (the TINYC part and tinyc-data are already in use)
     label=$ID_FS_LABEL                         # udev tells us the name and type
-    case "$label" in TINYC|tinyc-data) exit 0 ;; esac
+    case "$label" in TINYC|tinyc-data|tinyc) exit 0 ;; esac
+    # the computer's hidden parts: EFI system, Microsoft reserved, Windows recovery
+    case "$ID_PART_ENTRY_TYPE" in
+        c12a7328-f81f-11d2-ba4b-00a0c93ec93b|e3c9e316-0b5c-4db8-817d-f92df00215ae|de94bba4-06d1-4d40-a16a-bfd50179d6ac|0xef|0x27) exit 0 ;;
+    esac
     grep -q "^$dev " /proc/mounts && exit 0
     type=$ID_FS_TYPE
     name=$(printf '%s' "${label:-USB-$2}" | tr '/ ' '__')
