@@ -1,0 +1,45 @@
+tinyc (tinyCcOS) is built from these open-source projects.
+
+tinyc is Alpine Linux 3.24 underneath. Every Alpine package in tinyc is Alpine's own,
+unmodified build (some files are left out to save space, like docs and 3D graphics; the
+"Apps" app puts them back when a program needs them). The full list, with versions, is in
+packages-64bit-versions.txt and packages-32bit-versions.txt. Their source code is in
+Alpine's aports (https://gitlab.alpinelinux.org/alpine/aports) and on
+https://pkgs.alpinelinux.org, and each package's licence is listed there.
+
+The main parts:
+
+  Linux kernel 6.18.63      GPL-2.0          https://kernel.org
+                            unmodified, built with kernel-tinyc.config (64-bit) and
+                            kernel-tinyc32.config (32-bit). Source: linux-6.18.63.tar.xz from kernel.org
+  GRUB 2.12                 GPL-3.0          https://www.gnu.org/software/grub/
+                            (the stick's boot menu: Ubuntu's build for the 64-bit stick,
+                             Alpine's for the 32-bit one)
+  BusyBox 1.37              GPL-2.0          https://busybox.net
+  musl libc 1.2             MIT              https://musl.libc.org
+  IceWM 4.0                 LGPL-2.0         https://ice-wm.org  (the taskbar and windows)
+  Xfe 2.1                   GPL-2.0          http://roland65.free.fr/xfe/  (Files)
+  FOX toolkit               LGPL-2.1 + exception  (Xfe's toolkit)
+  FLTK 1.3                  LGPL-2.0 + FLTK exception  https://www.fltk.org
+                            (Apps, Wi-Fi, Notepad, Settings and the other small tinyc programs)
+  X.Org server 21.1, libX11 and friends  MIT/X11  https://x.org
+  xterm                     MIT/X11          (Terminal)
+  iwd 3                     LGPL-2.1         https://iwd.wiki.kernel.org  (Wi-Fi)
+  eudev                     GPL-2.0          (finds the hardware)
+  D-Bus                     AFL-2.1 / GPL-2.0
+  ALSA utilities            GPL-2.0          (sound)
+  bash 5.3                  GPL-3.0          nano 9  GPL-3.0
+  e2fsprogs 1.47            GPL-2.0 / LGPL / MIT  (makes the stick's data part)
+  apk-tools                 GPL-2.0          (installs apps)
+  DejaVu fonts              Bitstream Vera / DejaVu licence (free)
+  tz database               public domain    https://www.iana.org/time-zones
+  wireless-regdb            ISC              (which Wi-Fi channels each country allows)
+  Firmware (Intel/Realtek/Atheros Wi-Fi, Intel graphics)  from linux-firmware, via Alpine's
+                            linux-firmware-* packages; redistributable, each under its own
+                            licence (https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git)
+
+Written for tinyc / CcOS (this repository): the programs in apps/ (Apps, Wi-Fi, Notepad,
+Settings, the tray icons, the volume slider, the shutdown question), the scripts in overlay/
+(start-up, settings, the easy commands, automount...), the theme, the /o\ icons and the
+wallpapers (made with CcOS's own wallpaper generator), stage1/init and the build tools.
+apps/mkpart.c comes from CcOS. apps/glstub/ are tiny empty stand-ins for libGL/libGLU.

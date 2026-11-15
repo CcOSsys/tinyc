@@ -1,0 +1,14 @@
+[OPTIONS]
+root_warn=0
+root_mode=1
+
+[PROGS]
+txtviewer=notepad
+txteditor=notepad
+xterm=xterm
+
+[FILETYPES]
+txt=notepad;notepad;Text file;txt;txt;
+log=notepad;notepad;Log file;txt;txt;
+conf=notepad;notepad;Settings file;txt;txt;
+md=notepad;notepad;Notes;txt;txt;

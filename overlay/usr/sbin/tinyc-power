@@ -1,0 +1,8 @@
+#!/bin/sh
+# tinyc-power off|reboot : write everything to the stick, then turn off / restart
+sync
+case "$1" in
+    off|poweroff) poweroff -f ;;
+    reboot|restart) reboot -f ;;
+    *) echo "usage: tinyc-power off|reboot"; exit 1 ;;
+esac

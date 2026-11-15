@@ -1,0 +1,5 @@
+#!/bin/sh
+# tinyc-hint TEXT - shows how the same thing is done the usual Linux way, in grey (the easy commands use it).
+# "hints off" in the Terminal turns these off, "hints on" back on.
+[ -e /root/.tinyc-hints-off ] && exit 0
+printf '\033[2m  (the usual Linux way: %s)\033[0m\n' "$*"

@@ -1,0 +1,25 @@
+#!/bin/sh
+# tinyc-automount add|remove DEVICE : mount a plugged-in drive under /media/NAME, or clean up after it
+dev=/dev/$2
+case "$1" in
+add)
+    # not tinyc's own stick (the TINYC part and tinyc-data are already in use)
+    label=$ID_FS_LABEL                         # udev tells us the name and type
+    case "$label" in TINYC|tinyc-data) exit 0 ;; esac
+    grep -q "^$dev " /proc/mounts && exit 0
+    type=$ID_FS_TYPE
+    name=$(printf '%s' "${label:-USB-$2}" | tr '/ ' '__')
+    m=/media/$name; n=2; while [ -e "$m" ] && grep -q " $m " /proc/mounts; do m=/media/$name-$n; n=$((n + 1)); done
+    mkdir -p "$m"
+    case "$type" in
+        vfat)  o="-t vfat -o utf8,shortname=mixed,flush" ;;
+        exfat) o="-t exfat" ;;
+        ntfs)  o="-t ntfs3" ;;
+        *)     o="" ;;
+    esac
+    mount $o "$dev" "$m" 2>/dev/null || { rmdir "$m" 2>/dev/null; exit 1; } ;;
+remove)
+    m=$(awk -v d="$dev" '$1 == d { print $2 }' /proc/mounts)
+    [ -n "$m" ] && { umount -l "$m"; rmdir "$m" 2>/dev/null; } ;;
+esac
+exit 0

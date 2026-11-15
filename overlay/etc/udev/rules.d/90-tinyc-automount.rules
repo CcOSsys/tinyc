@@ -1,0 +1,3 @@
+# tinyc: USB sticks and drives open by themselves under /media/NAME (and go away when pulled out)
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", RUN+="/usr/sbin/tinyc-automount add %k"
+ACTION=="remove", SUBSYSTEM=="block", RUN+="/usr/sbin/tinyc-automount remove %k"

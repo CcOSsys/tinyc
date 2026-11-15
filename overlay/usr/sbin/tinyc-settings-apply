@@ -1,0 +1,45 @@
+#!/bin/sh
+# tinyc-settings-apply [boot|desktop|time|keyboard|wallpaper|brightness] : put /etc/tinyc/settings into effect
+#   boot      : time zone + the computer's clock + brightness (at start, before the desktop)
+#   desktop   : keyboard + wallpaper (when the desktop starts)
+F=/etc/tinyc/settings
+TIMEZONE=UTC; NET_TIME=1; RTC_LOCAL=0; KEYBOARD=us; WALLPAPER=/usr/share/tinyc/wallpapers/water.jpg; BRIGHTNESS=
+[ -f $F ] && . $F
+rtc() { if [ "$RTC_LOCAL" = 1 ]; then echo -l; else echo -u; fi; }
+do_zone() {
+    z=/usr/share/zoneinfo/$TIMEZONE; [ -f "$z" ] || z=/usr/share/zoneinfo/UTC
+    ln -sf "$z" /etc/localtime; echo "$TIMEZONE" > /etc/timezone
+}
+do_clock() { hwclock -s $(rtc) 2>/dev/null; }
+do_nettime() {                       # internet time, in the background, a few tries
+    [ "$NET_TIME" = 1 ] || return 0
+    ( for i in 1 2 3 4 5 6 7 8 9 10; do
+          if ntpd -n -q -p pool.ntp.org >/dev/null 2>&1; then hwclock -w $(rtc) 2>/dev/null; exit 0; fi
+          sleep 15
+      done ) >/dev/null 2>&1 &
+}
+do_keyboard() { [ -n "$DISPLAY" ] && setxkbmap "$KEYBOARD" 2>/dev/null; }
+do_wallpaper() {
+    [ -n "$DISPLAY" ] || return 0
+    [ -f "$WALLPAPER" ] || WALLPAPER=/usr/share/tinyc/wallpapers/water.jpg
+    sed -i "s|^DesktopBackgroundImage=.*|DesktopBackgroundImage=\"$WALLPAPER\"|" /etc/icewm/preferences
+    ( setsid icewmbg -p >/dev/null 2>&1 & )      # draw the new picture (icewmbg sets it and quits)
+}
+do_brightness() {
+    [ -n "$BRIGHTNESS" ] || return 0
+    for b in /sys/class/backlight/*; do
+        [ -e "$b/brightness" ] || continue
+        m=$(cat "$b/max_brightness"); v=$(( m * BRIGHTNESS / 100 )); [ $v -lt 1 ] && v=1
+        echo $v > "$b/brightness" 2>/dev/null; break
+    done
+}
+case "$1" in
+    boot) do_zone; do_clock; do_brightness ;;
+    nettime) do_nettime ;;
+    desktop) do_keyboard; do_wallpaper ;;
+    time) do_zone; do_nettime ;;
+    keyboard) do_keyboard ;;
+    wallpaper) do_wallpaper ;;
+    brightness) do_brightness ;;
+    *) echo "usage: tinyc-settings-apply boot|nettime|desktop|time|keyboard|wallpaper|brightness"; exit 1 ;;
+esac

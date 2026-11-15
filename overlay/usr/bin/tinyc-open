@@ -1,0 +1,17 @@
+#!/bin/sh
+# tinyc-open FILE|FOLDER|WEB-ADDRESS - open it in the right program (used by op)
+f=$1
+case "$f" in
+http://*|https://*)
+    for b in firefox firefox-esr chromium netsurf-gtk3 netsurf dillo links; do
+        command -v $b >/dev/null 2>&1 && { setsid $b "$f" >/dev/null 2>&1 & exit 0; }
+    done
+    exit 2 ;;
+esac
+[ -e "$f" ] || exit 1
+if [ -d "$f" ]; then setsid xfe "$f" >/dev/null 2>&1 & exit 0; fi
+# a text file (nothing but text in its start) -> Notepad, anything else -> its folder in Files
+a=$(head -c 4096 "$f" | wc -c); b=$(head -c 4096 "$f" | tr -d '\000' | wc -c)
+if [ "$a" = "$b" ]; then setsid notepad "$f" >/dev/null 2>&1 &
+else setsid xfe "$(dirname "$f")" >/dev/null 2>&1 & fi
+exit 0

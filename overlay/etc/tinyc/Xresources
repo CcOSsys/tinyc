@@ -1,0 +1,13 @@
+! tinyc: how xterm looks
+XTerm*faceName: DejaVu Sans Mono
+XTerm*faceSize: 11
+XTerm*background: #ffffff
+XTerm*foreground: #24262a
+XTerm*cursorColor: #2674d8
+XTerm*internalBorder: 6
+XTerm*scrollBar: false
+XTerm*saveLines: 2000
+XTerm*selectToClipboard: true
+XTerm*title: Terminal
+XTerm*geometry: 90x26
+XTerm*iconName: Terminal

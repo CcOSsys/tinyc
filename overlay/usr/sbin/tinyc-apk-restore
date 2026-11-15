@@ -1,0 +1,16 @@
+#!/bin/sh
+# tinyc-apk-restore [APP...] : tinyc ships the big 3D graphics parts (Mesa, LLVM) left out, to stay
+# small. When an installed app needs them (Firefox, games...), put them back.
+#   With APP names: checks those apps. Without: checks every app that isn't part of tinyc.
+T=/etc/tinyc/trimmed; [ -s $T ] || exit 0
+if [ $# = 0 ]; then
+    set -- $(grep -vxF -f /etc/tinyc/base-installed /etc/apk/world 2>/dev/null)
+    [ $# = 0 ] && exit 0
+fi
+# everything those apps use, in one go (apk dot draws the dependency tree)
+deps=$(/sbin/apk dot "$@" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' | sed 's/-[0-9][^-]*-r[0-9]*$//' | sort -u)
+needed=$(echo "$deps" | grep -xF -f $T | tr '\n' ' ')
+[ -n "${needed% }" ] || exit 0
+echo "Getting the 3D graphics parts it needs: $needed"
+/sbin/apk fix --reinstall $needed || exit 1
+for p in $needed; do sed -i "/^$p\$/d" $T; done

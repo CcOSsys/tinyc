@@ -1,0 +1,18 @@
+#!/bin/sh
+# tinyc-brightness get | set PERCENT | up | down : the laptop screen's brightness (brightness keys, Settings)
+b=""; for d in /sys/class/backlight/*; do [ -e "$d/brightness" ] && { b=$d; break; }; done
+[ -n "$b" ] || { echo "no backlight"; exit 1; }
+max=$(cat "$b/max_brightness"); cur=$(cat "$b/brightness")
+pct=$(( (cur * 100 + max / 2) / max ))
+case "$1" in
+    get) echo "$pct"; exit 0 ;;
+    set) pct=$2 ;;
+    up) pct=$(( pct + 10 )) ;;
+    down) pct=$(( pct - 10 )) ;;
+    *) echo "usage: tinyc-brightness get|set PERCENT|up|down"; exit 1 ;;
+esac
+[ "$pct" -gt 100 ] && pct=100; [ "$pct" -lt 5 ] && pct=5          # never all the way to black
+v=$(( max * pct / 100 )); [ $v -lt 1 ] && v=1
+echo $v > "$b/brightness"
+# remember it for the next start
+sed -i "s/^BRIGHTNESS=.*/BRIGHTNESS=$pct/" /etc/tinyc/settings 2>/dev/null

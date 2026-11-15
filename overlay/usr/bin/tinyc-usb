@@ -1,0 +1,51 @@
+#!/bin/sh
+# tinyc-usb - the USB sticks plugged in, numbered usb1, usb2, ... (used by lsusb / cdusb / xusb in the Terminal)
+#   tinyc-usb list          a friendly list
+#   tinyc-usb find NAME     NAME = usb1 / 1 / (nothing, if there's only one)  ->  "usbN<TAB>folder<TAB>name"
+#   tinyc-usb names         usb1 usb2 ...  (for Tab completion)
+# tinyc mounts sticks under /media/NAME by itself (tinyc-automount); tinyc's own stick is /mnt/stick and /mnt/data.
+G=$(printf '\033[1;32m'); R=$(printf '\033[1;31m'); C=$(printf '\033[1;36m'); D=$(printf '\033[2m'); N=$(printf '\033[0m')
+
+# the numbered list: "N<TAB>folder<TAB>name", ordered by device (sdb before sdc)
+sticks() {
+    awk '$2 ~ /^\/media\// { p=$2; gsub(/\\040/, " ", p); print $1 "\t" p }' /proc/mounts | sort | awk -F'\t' '
+        { i++; n=$2; sub(/^\/media\//, "", n); printf "%d\t%s\t%s\n", i, $2, n }'
+}
+human() { awk -v k="$1" 'BEGIN { if (k >= 1048576) printf "%.1f GB", k / 1048576; else if (k >= 1024) printf "%d MB", k / 1024; else printf "%d KB", k }'; }
+
+case "$1" in
+list)
+    L=$(sticks)
+    if [ -z "$L" ]; then
+        echo "No USB sticks plugged in. (Plug one in and type lsusb again.)"
+        echo "${D}The stick tinyc runs from isn't listed: your files are kept on it already.${N}"
+        exit 0
+    fi
+    echo "USB sticks:"
+    echo "$L" | while IFS='	' read -r n m name; do
+        set -- $(stat -f -c '%b %f %S' "$m" 2>/dev/null)
+        tot=$(( ${1:-0} * ${3:-0} / 1024 )); fr=$(( ${2:-0} * ${3:-0} / 1024 ))
+        here=""; case "$PWD/" in "$m"/*) here="   ${G}<- you're here${N}" ;; esac
+        ro=""; awk -v m="$m" '{ gsub(/\\040/, " ", $2) } $2==m && $4 ~ /^ro/ { f=1 } END { exit !f }' /proc/mounts && ro=" ${R}(read-only)${N}"
+        printf "  ${C}usb%s${N}  %-20s %s free of %s%s%s\n" "$n" "$name" "$(human $fr)" "$(human $tot)" "$ro" "$here"
+    done
+    echo "${D}Type cdusb usb1 to go into one, xusb to leave it. (lsusb -a lists every USB device.)${N}"
+    /usr/bin/tinyc-hint "ls /media"
+    ;;
+find)
+    L=$(sticks); want=${2#usb}; want=${want#USB}
+    if [ -z "$L" ]; then echo "${R}✖${N} No USB sticks plugged in." >&2; exit 1; fi
+    if [ -z "$want" ]; then
+        if [ "$(echo "$L" | wc -l)" = 1 ]; then want=1
+        else echo "Which one? Type cdusb and its name, like:  cdusb usb1" >&2; "$0" list >&2; exit 1; fi
+    fi
+    line=$(echo "$L" | awk -F'\t' -v w="$want" '$1==w')
+    if [ -z "$line" ]; then echo "${R}✖${N} There's no usb$want. Type lsusb to see the sticks." >&2; exit 1; fi
+    printf 'usb%s\n' "$line"
+    ;;
+names)
+    sticks | awk -F'\t' '{ printf "usb%s ", $1 }'
+    ;;
+*)
+    echo "tinyc-usb list | find NAME | names"; exit 1 ;;
+esac

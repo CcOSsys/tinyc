@@ -1,0 +1,9 @@
+# tinyc keyboard shortcuts
+key "XF86AudioRaiseVolume"  amixer -q set Master 5%+ unmute
+key "XF86AudioLowerVolume"  amixer -q set Master 5%-
+key "XF86AudioMute"         amixer -q set Master toggle
+key "Super+e"               xfe /root
+key "Super+t"               xterm
+key "XF86MonBrightnessUp"   tinyc-brightness up
+key "XF86MonBrightnessDown" tinyc-brightness down
+key "Super+i"               settings

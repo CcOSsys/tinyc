@@ -1,0 +1,5 @@
+*.key
+keys/
+*.img
+*.img.gz
+*.sfs

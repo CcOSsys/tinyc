@@ -1,0 +1,4 @@
+prog "Terminal" /usr/share/tinyc/icons/terminal_32x32.png xterm
+prog "Files" /usr/share/tinyc/icons/files_32x32.png xfe /root
+prog "Notepad" /usr/share/tinyc/icons/notepad_32x32.png notepad
+prog "Apps" /usr/share/tinyc/icons/apps_32x32.png apps

@@ -1,0 +1,44 @@
+#!/bin/sh
+# tinyc stage 2: runs from the stick (after stage 1 found it), starts the devices, network and desktop
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root TERM=linux
+mkdir -p /dev/pts /dev/shm /run /tmp
+mount -t devpts devpts /dev/pts
+mount -t tmpfs -o mode=1777 tmpfs /dev/shm
+mount -t tmpfs -o mode=755 tmpfs /run
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+E=$(printf '\033'); G="$E[1;32m"; RD="$E[1;31m"; C="$E[1;36m"; N="$E[0m"
+ok()   { printf '[  %sOK%s  ] %s\n' "$G" "$N" "$1"; }
+fail() { printf '[ %sFAIL%s ] %s\n' "$RD" "$N" "$1"; }
+step() { m=$1; shift; if "$@" >/dev/null 2>&1; then ok "$m"; else fail "$m"; fi; }
+step "Started the device manager" udevd --daemon
+udevadm trigger --action=add >/dev/null 2>&1; udevadm settle -t 10 >/dev/null 2>&1
+ok "Found the hardware"
+tinyc-settings-apply boot
+ok "Set the clock ($(date +%H:%M), $(cat /etc/timezone 2>/dev/null))"
+step "Set the computer's name (tinyc)" hostname tinyc
+ip link set lo up 2>/dev/null
+for n in /sys/class/net/eth* /sys/class/net/en*; do
+    [ -e "$n" ] || continue; i=${n##*/}; ip link set "$i" up 2>/dev/null
+    udhcpc -i "$i" -b -q -t 5 -s /usr/share/udhcpc/default.script >/dev/null 2>&1
+done
+ok "Started the network"
+tinyc-settings-apply nettime          # internet time, in the background
+mkdir -p /run/dbus /var/lib/iwd
+step "Started the message bus" dbus-daemon --system
+if ls /sys/class/net/wl* >/dev/null 2>&1; then
+    mkdir -p /var/log; /usr/libexec/iwd -d >/var/log/iwd.log 2>&1 &     # the log helps when Wi-Fi won't connect
+    ok "Started Wi-Fi"
+fi
+if [ -d /proc/asound ] && ls /proc/asound/card* >/dev/null 2>&1; then
+    amixer -q set Master 80% unmute 2>/dev/null; amixer -q set PCM 100% unmute 2>/dev/null; amixer -q set Speaker 100% unmute 2>/dev/null
+    ok "Started sound"
+fi
+ok "Starting the desktop"
+COLS=$(stty size 2>/dev/null | cut -d' ' -f2); COLS=${COLS:-80}
+printf '\n%*s%sWelcome to tinyc!%s\n' $(( (COLS - 17) / 2 )) '' "$C" "$N"
+sleep 1
+XARGS=""; grep -qw nomodeset /proc/cmdline && XARGS="-config /etc/X11/xorg-safe.conf"   # safe graphics
+setsid sh -c "exec xinit /etc/tinyc/xsession -- /usr/libexec/Xorg :0 vt1 -nolisten tcp -keeptty -novtswitch $XARGS" </dev/tty1 >/tmp/xinit.log 2>&1
+sync
+printf '\n[ %sFAIL%s ] The desktop stopped. Type startx to try again, reboot to restart.\n\n' "$RD" "$N"
+exec setsid -c sh -l </dev/tty1 >/dev/tty1 2>&1

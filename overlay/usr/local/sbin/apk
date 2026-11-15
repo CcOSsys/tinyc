@@ -1,0 +1,12 @@
+#!/bin/sh
+# apk, then tinyc-apk-restore after installing (see /usr/sbin/tinyc-apk-restore).
+# If apk's own last step failed because of a left-out part, it runs again once that part is back.
+/sbin/apk "$@"; r=$?
+case " $* " in
+    *" --simulate "*|*" -s "*) ;;
+    *" add "*|*" fix "*|*" upgrade "*)
+        apps=""; past=0
+        for a in "$@"; do [ $past = 1 ] && case "$a" in -*) ;; *) apps="$apps $a" ;; esac; case "$a" in add|fix|upgrade) past=1 ;; esac; done
+        if /usr/sbin/tinyc-apk-restore $apps && [ $r != 0 ]; then /sbin/apk fix; r=$?; fi ;;
+esac
+exit $r

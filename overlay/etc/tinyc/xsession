@@ -1,0 +1,13 @@
+#!/bin/sh
+# what runs when the desktop starts
+xsetroot -solid '#2674d8'
+export ICEWM_PRIVCFG=/etc/icewm
+xrdb -merge /etc/tinyc/Xresources
+tinyc-settings-apply desktop       # keyboard layout and wallpaper
+# the battery meter only on computers with a battery
+if ls /sys/class/power_supply/*/type 2>/dev/null | xargs -r cat 2>/dev/null | grep -q Battery; then b=1; else b=0; fi
+sed -i "s/^TaskBarShowAPMStatus=.*/TaskBarShowAPMStatus=$b/" /etc/icewm/preferences
+tinyc-tray &                       # Wi-Fi and volume icons next to the clock
+export SHELL=/bin/bash
+cd /root                           # the Terminal starts in your home folder
+exec icewm-session

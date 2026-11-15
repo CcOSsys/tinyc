@@ -1,0 +1,7 @@
+# tinyc settings (the Settings window changes these; kept on the stick)
+TIMEZONE=Europe/Warsaw
+NET_TIME=1
+RTC_LOCAL=0
+KEYBOARD=pl
+WALLPAPER=/usr/share/tinyc/wallpapers/water.jpg
+BRIGHTNESS=
